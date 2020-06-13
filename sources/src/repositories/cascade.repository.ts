@@ -4,22 +4,16 @@ import {
     Class,
     DefaultCrudRepository,
     Entity,
+    Options,
+    Filter,
     Where,
     Fields,
 } from "@loopback/repository";
 
 import { Ctor } from "../types";
 
-export interface RepositoryConfig<Model extends Entity> {
-    id: keyof Model;
-    where: (
-        context: InvocationContext,
-        where: Where<Model>
-    ) => Promise<Where<Model>>;
-    fields: (
-        context: InvocationContext,
-        fields: Fields<Model>
-    ) => Promise<Fields<Model>>;
+export interface CascadeOptions extends Options {
+    filter?: Filter;
 }
 
 /**
@@ -38,7 +32,7 @@ export function CascadeRepositoryMixin<
     Model extends Entity,
     ModelID,
     ModelRelations extends object = {}
->(config: RepositoryConfig<Model>) {
+>() {
     /**
      * Return function with generic type of repository class, returns mixed in class
      *
