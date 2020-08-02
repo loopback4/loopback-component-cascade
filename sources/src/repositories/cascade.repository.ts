@@ -63,54 +63,76 @@ export function CascadeRepositoryMixin<
              * Create methods
              */
             async create(
-                entity: Model,
+                entity: DataObject<Model>,
                 options?: CascadeOptions
             ): Promise<Model> {
-                return super.create(entity, options);
+                let result = await super.create(entity, options);
+
+                /** Create nested models */
+                const nests = Object.entries(entity).filter(
+                    ([key, value]) => typeof value === "object"
+                );
+                for (let [key, value] of nests) {
+                    if (Array.isArray(value)) {
+                        (result as any)[key] = this.createAll(
+                            {
+                                ...value,
+                                relationId: (result as any)["relationId"],
+                            },
+                            options
+                        );
+                    } else {
+                        (result as any)[key] = this.create(
+                            {
+                                ...value,
+                                relationId: (result as any)["relationId"],
+                            },
+                            options
+                        );
+                    }
+                }
+
+                return result;
             }
             async createAll(
                 entities: DataObject<Model>[],
                 options?: CascadeOptions
-            ): Promise<Model[]> {}
+            ): Promise<Model[]> {
+                return Promise.all(
+                    entities.map((entity) => this.create(entity, options))
+                );
+            }
 
             /**
              * Update methods
              */
-            async update(
-                entity: Model,
-                options?: CascadeOptions
-            ): Promise<void>;
             async updateAll(
                 data: DataObject<Model>,
                 where?: Where<Model>,
                 options?: CascadeOptions
-            ): Promise<Count>;
+            ): Promise<Count> {}
             async updateById(
                 id: ModelID,
                 data: DataObject<Model>,
                 options?: CascadeOptions
-            ): Promise<void>;
+            ): Promise<void> {}
             async replaceById(
                 id: ModelID,
                 data: DataObject<Model>,
                 options?: CascadeOptions
-            ): Promise<void>;
+            ): Promise<void> {}
 
             /**
              * Delete methods
              */
-            async delete(
-                entity: Model,
-                options?: CascadeOptions
-            ): Promise<void>;
             async deleteAll(
                 where?: Where<Model>,
                 options?: CascadeOptions
-            ): Promise<Count>;
+            ): Promise<Count> {}
             async deleteById(
                 id: ModelID,
                 options?: CascadeOptions
-            ): Promise<void>;
+            ): Promise<void> {}
         }
 
         return Repository as any;
