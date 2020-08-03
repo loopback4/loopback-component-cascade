@@ -9,6 +9,7 @@ import {
     Where,
     Count,
     EntityNotFoundError,
+    RelationMetadata,
 } from "@loopback/repository";
 
 import { Ctor } from "../types";
@@ -69,11 +70,28 @@ export function CascadeRepositoryMixin<
                 let result = await super.create(entity, options);
 
                 /** Create nested models */
-                const nests = Object.entries(entity).filter(
-                    ([key, value]) => typeof value === "object"
+                const relations = Object.entries(entity).filter(
+                    ([_, value]) => typeof value === "object"
                 );
-                for (let [key, value] of nests) {
-                    if (Array.isArray(value)) {
+
+                for (let [relation, models] of relations) {
+                    const target: DefaultCrudRepository<
+                        any,
+                        any,
+                        any
+                    > = (this as any)[relation]().getTargetRepository();
+                    const relation: RelationMetadata = this.entityClass.definition.relations[]
+
+                    if (Array.isArray(models)) {
+
+                        (result as any)[relation] = await target.createAll(
+                            models.map((model) => ({
+                                ...model,
+                                keyFrom: result["keyTo"],
+                            })),
+                            options
+                        );
+
                         (result as any)[key] = this.createAll(
                             {
                                 ...value,
