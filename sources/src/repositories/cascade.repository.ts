@@ -11,8 +11,6 @@ import {
     RelationMetadata,
 } from "@loopback/repository";
 
-import { Ctor } from "../types";
-
 export interface CascadeOptions extends Options {
     filter?: Filter;
     models?: any[];

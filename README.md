@@ -56,5 +56,5 @@ export class UserRepository extends CascadeRepositoryMixin<
 
 ## License
 
-This project is licensed under the [MIT license](LICENSE).  
+This project is licensed under the [MIT license](LICENSE.md).  
 Copyright (c) KoLiBer (koliberr136a1@gmail.com)
