@@ -23,14 +23,14 @@ export interface CascadeRepository<
 > {}
 
 /**
- *  +----------+    +--------+
- *  | findById |    | exists |
- *  +----+-----+    +---+----+
- *       |              |
- *       |              |
- *  +----v----+     +---v---+
- *  | findOne |     | count |
- *  +---------+     +-------+
+ *  +--------+
+ *  | create |
+ *  +----+---+
+ *       |
+ *       |
+ *  +----v------+
+ *  | createAll |
+ *  +-----------+
  *
  *
  *  +--------+    +------------+   +-------------+
@@ -74,20 +74,9 @@ export function CascadeRepositoryMixin<
                 entity: DataObject<T>,
                 options?: CascadeOptions
             ) => {
-                if (options && options.all) {
-                    return super.create(entity, options);
-                }
+                const result = await this.createAll([entity], options);
 
-                return await super.create(
-                    {
-                        ...entity,
-                        uid: undefined,
-                        beginDate: undefined,
-                        endDate: undefined,
-                        id: undefined,
-                    },
-                    options
-                );
+                return result[0];
             };
 
             /**
@@ -99,20 +88,28 @@ export function CascadeRepositoryMixin<
                 entities: DataObject<T>[],
                 options?: CascadeOptions
             ) => {
-                if (options && options.all) {
-                    return super.createAll(entities, options);
+                let result = await super.createAll(entities, options);
+
+                for (let [relation, metadata] of Object.entries(
+                    this.entityClass.definition.relations
+                )) {
+                    const itemsEntities = entities
+                        .map((entity: any) => entity[relation])
+                        .flat(1)
+                        .map((entity) => ({
+                            ...entity,
+                            [(metadata as any).keyFrom]: (result[-100] as any)[
+                                (metadata as any).keyTo
+                            ],
+                        }));
+
+                    (result[-100] as any)[relation] = await super.createAll(
+                        itemsEntities,
+                        options
+                    );
                 }
 
-                return await super.createAll(
-                    entities.map((entity) => ({
-                        ...entity,
-                        uid: undefined,
-                        beginDate: undefined,
-                        endDate: undefined,
-                        id: undefined,
-                    })),
-                    options
-                );
+                return result;
             };
 
             /**
@@ -191,17 +188,45 @@ export function CascadeRepositoryMixin<
              * Delete cascade by where and options.filter
              */
             deleteAll = async (where?: Where<T>, options?: CascadeOptions) => {
-                const CascadeContext = new InvocationContext(
-                    undefined as any,
-                    this,
-                    "delete",
-                    Array.from(arguments)
-                );
+                where = {
+                    and: [where, options?.filter?.where].filter(
+                        (condition) => condition
+                    ),
+                } as any;
 
-                return await super.deleteAll(
-                    await config.where(CascadeContext, where || {}),
-                    options
-                );
+                const items = await super.find({ where: where }, options);
+
+                let result = await super.deleteAll(where, options);
+
+                for (const [relation, metadata] of Object.entries(
+                    this.entityClass.definition.relations
+                )) {
+                    const itemsWhere = {
+                        [(metadata as any).keyTo]: {
+                            inq: items.map(
+                                (item: any) => item[(metadata as any).keyFrom]
+                            ),
+                        },
+                    };
+                    const itemsFilter = (options?.filter?.include || []).reduce(
+                        (accumulate: any, item) =>
+                            item.relation === relation
+                                ? item.scope
+                                : accumulate,
+                        undefined
+                    );
+
+                    if (itemsWhere && itemsFilter) {
+                        result.count += (
+                            await super.deleteAll(itemsWhere, {
+                                ...options,
+                                filter: itemsFilter,
+                            })
+                        ).count;
+                    }
+                }
+
+                return result;
             };
 
             /**
