@@ -1,272 +1,232 @@
+import { MixinTarget } from "@loopback/core";
+import { InvocationContext } from "@loopback/context";
 import {
-    juggler,
-    Class,
-    Entity,
     DefaultCrudRepository,
     DataObject,
     Options,
-    Filter,
+    Entity,
     Where,
-    Count,
-    RelationMetadata,
+    Filter,
 } from "@loopback/repository";
 
 export interface CascadeOptions extends Options {
-    filter?: Filter;
-    models?: any[];
+    filter?: Filter<any>;
 }
 
 /**
- * Repository Type
+ * This interface contains additional types added to CascadeRepositoryMixin type
  */
 export interface CascadeRepository<
-    Model extends Entity,
-    ModelID,
-    ModelRelations extends object = {}
-> extends DefaultCrudRepository<Model, ModelID, ModelRelations> {}
+    T extends Entity,
+    ID,
+    Relations extends object = {}
+> {}
 
 /**
- * Repository Mixin
+ *  +----------+    +--------+
+ *  | findById |    | exists |
+ *  +----+-----+    +---+----+
+ *       |              |
+ *       |              |
+ *  +----v----+     +---v---+
+ *  | findOne |     | count |
+ *  +---------+     +-------+
+ *
+ *
+ *  +--------+    +------------+   +-------------+
+ *  | update |    | updateById |   | replaceById |
+ *  +----+---+    +-----+------+   +-------+-----+
+ *       |              |                  |
+ *       |              |                  |
+ *       |        +-----v-----+            |
+ *       +--------> updateAll <------------+
+ *                +-----------+
+ *
+ *
+ *  +--------+    +------------+
+ *  | delete |    | deleteById |
+ *  +--+-----+    +------+-----+
+ *     |                 |
+ *     |                 |
+ *     |  +-----------+  |
+ *     +--> deleteAll <--+
+ *        +-----------+
+ */
+/**
+ * Cascade repository mixin, add Create, Update, Delete operations supporting Cascade
  */
 export function CascadeRepositoryMixin<
-    Model extends Entity,
-    ModelID,
-    ModelRelations extends object = {}
+    T extends Entity,
+    ID,
+    Relations extends object = {}
 >() {
-    /**
-     * Return function with generic type of repository class, returns mixed in class
-     *
-     * bugfix: optional type, load type from value
-     */
     return function <
-        RepositoryClass extends Class<
-            DefaultCrudRepository<Model, ModelID, ModelRelations>
-        >
-    >(
-        superClass?: RepositoryClass
-    ): RepositoryClass &
-        Class<CascadeRepository<Model, ModelID, ModelRelations>> {
-        const parentClass: Class<DefaultCrudRepository<
-            Model,
-            ModelID,
-            ModelRelations
-        >> = superClass || DefaultCrudRepository;
-
-        class Repository extends parentClass
-            implements CascadeRepository<Model, ModelID, ModelRelations> {
-            constructor(ctor: Ctor<Model>, dataSource: juggler.DataSource) {
-                super(ctor, dataSource);
-            }
-
+        R extends MixinTarget<DefaultCrudRepository<T, ID, Relations>>
+    >(superClass: R) {
+        class MixedRepository extends superClass
+            implements CascadeRepository<T, ID, Relations> {
             /**
-             * Get target repository from inclusionResolvers
+             * Check entity unique fields
+             * and set `uid`, `beginDate`, `endDate`, `id` to undefined
+             * then create entity
              */
-            private getTargetRepository(relation: string) {
-                if (!(relation in this)) {
-                    return undefined;
-                }
-
-                return (this as any)
-                    [relation]()
-                    .getTargetRepository() as DefaultCrudRepository<
-                    any,
-                    any,
-                    any
-                >;
-            }
-
-            /**
-             * Get target relation from entityClass
-             */
-            private getTargetRelation(relation: string) {
-                if (!(relation in this.entityClass.definition.relations)) {
-                    return undefined;
-                }
-
-                return this.entityClass.definition.relations[
-                    relation
-                ] as RelationMetadata;
-            }
-
-            /**
-             * Get target where from options
-             */
-            private getTargetWhere(relation: string, options?: CascadeOptions) {
-                const targetEntity = this.getTargetRelation(relation)?.target();
-
-                return targetEntity?.buildWhereForId({
-                    inq: (options?.models || []).map((model) =>
-                        targetEntity?.getIdOf(model)
-                    ),
-                });
-            }
-
-            /**
-             * Get target model with relation keys
-             */
-            private getTargetModel(relation: string, parent: any, child: any) {
-                const targetRelation = this.getTargetRelation(relation);
-                if (!targetRelation) {
-                    return undefined;
-                }
-
-                return {
-                    ...child,
-                    [targetRelation.keyTo]: parent[targetRelation.keyFrom],
-                } as Model;
-            }
-
-            /**
-             * Get target options with filter, models
-             */
-            private getTargetOptions(
-                relation: string,
+            create = async (
+                entity: DataObject<T>,
                 options?: CascadeOptions
-            ) {
-                if (!options) {
-                    return undefined;
+            ) => {
+                if (options && options.all) {
+                    return super.create(entity, options);
                 }
 
-                return {
-                    ...options,
-                    filter: (options.filter?.include || [])
-                        .filter((inclusion) => inclusion.relation === relation)
-                        .reduce<any>(
-                            (_, inclusion) => inclusion.scope,
-                            undefined
+                return await super.create(
+                    {
+                        ...entity,
+                        uid: undefined,
+                        beginDate: undefined,
+                        endDate: undefined,
+                        id: undefined,
+                    },
+                    options
+                );
+            };
+
+            /**
+             * Check entities unique fields
+             * and set `uid`, `beginDate`, `endDate`, `id` to undefined
+             * then create entities
+             */
+            createAll = async (
+                entities: DataObject<T>[],
+                options?: CascadeOptions
+            ) => {
+                if (options && options.all) {
+                    return super.createAll(entities, options);
+                }
+
+                return await super.createAll(
+                    entities.map((entity) => ({
+                        ...entity,
+                        uid: undefined,
+                        beginDate: undefined,
+                        endDate: undefined,
+                        id: undefined,
+                    })),
+                    options
+                );
+            };
+
+            /**
+             * Cascade where and update all entities
+             */
+            updateAll = async (
+                data: DataObject<T>,
+                where?: Where<T>,
+                options?: CascadeOptions
+            ) => {
+                const CascadeContext = new InvocationContext(
+                    undefined as any,
+                    this,
+                    "update",
+                    Array.from(arguments)
+                );
+
+                return await super.updateAll(
+                    data,
+                    await config.where(CascadeContext, where || {}),
+                    options
+                );
+            };
+
+            /**
+             * Cascade id and update one entity
+             */
+            updateById = async (
+                id: ID,
+                data: DataObject<T>,
+                options?: CascadeOptions
+            ) => {
+                await this.updateAll(
+                    data,
+                    this.entityClass.buildWhereForId(id),
+                    options
+                );
+            };
+
+            /**
+             * Cascade id and update one entity
+             */
+            update = async (entity: T, options?: CascadeOptions) => {
+                await this.updateAll(
+                    entity,
+                    this.entityClass.buildWhereForId(
+                        this.entityClass.getIdOf(entity)
+                    ),
+                    options
+                );
+            };
+
+            /**
+             * Cascade id and replace one entity
+             */
+            replaceById = async (
+                id: ID,
+                data: DataObject<T>,
+                options?: CascadeOptions
+            ) => {
+                await this.updateAll(
+                    {
+                        ...Object.fromEntries(
+                            Object.entries(
+                                this.entityClass.definition.properties
+                            ).map(([key, _]) => [key, undefined])
                         ),
-                    models: (options.models || [])
-                        .map((model) => model[relation])
-                        .filter((model) => model)
-                        .flat(1),
-                } as CascadeOptions;
-            }
-
-            /**
-             * Create methods
-             */
-            async create(
-                entity: DataObject<Model>,
-                options?: CascadeOptions
-            ): Promise<Model> {
-                let result = await super.create(entity, options);
-
-                const children = Object.entries(entity)
-                    .filter(([_, value]) => typeof value === "object")
-                    .map(([key, value]) => ({
-                        relation: key,
-                        repository: this.getTargetRepository(key),
-                        options: this.getTargetOptions(key, options),
-                        models: Array.isArray(value)
-                            ? value.map((item) =>
-                                  this.getTargetModel(key, result, item)
-                              ).filter
-                            : this.getTargetModel(key, result, value),
-                    }))
-                    .filter(({ repository, models }) => repository && models)
-                    .map(async ({ relation, repository, options, models }) => {
-                        if (Array.isArray(models)) {
-                            (result as any)[
-                                relation
-                            ] = await repository?.createAll(models, options);
-                        } else {
-                            (result as any)[
-                                relation
-                            ] = await repository?.create(models, options);
-                        }
-                    });
-                await Promise.all(children);
-
-                return result;
-            }
-            async createAll(
-                entities: DataObject<Model>[],
-                options?: CascadeOptions
-            ): Promise<Model[]> {
-                return Promise.all(
-                    entities.map((entity) => this.create(entity, options))
+                        ...data,
+                    },
+                    this.entityClass.buildWhereForId(id),
+                    options
                 );
-            }
+            };
 
             /**
-             * Update methods
+             * Delete cascade by where and options.filter
              */
-            // async updateAll(
-            //     data: DataObject<Model>,
-            //     where?: Where<Model>,
-            //     options?: CascadeOptions
-            // ): Promise<Count> {}
-            // async updateById(
-            //     id: ModelID,
-            //     data: DataObject<Model>,
-            //     options?: CascadeOptions
-            // ): Promise<void> {}
-            // async replaceById(
-            //     id: ModelID,
-            //     data: DataObject<Model>,
-            //     options?: CascadeOptions
-            // ): Promise<void> {}
-
-            /**
-             * Delete methods
-             */
-            async deleteAll(
-                where?: Where<Model>,
-                options?: CascadeOptions
-            ): Promise<Count> {
-                if (options && !options.models) {
-                    const idProperty = this.entityClass.getIdProperties()[0];
-
-                    options.models = await super.find(
-                        options.filter as any,
-                        options
-                    );
-                    where = {
-                        [idProperty]: {
-                            inq: options.models.map(
-                                (model) => model[idProperty]
-                            ),
-                        },
-                    } as any;
-                }
-
-                let result = await super.deleteAll(where, options);
-
-                const children = (options?.filter?.include || []).map(
-                    async ({ relation, scope }) => {
-                        const targetRepository = this.getTargetRepository(
-                            relation
-                        );
-                        const targetOptions = this.getTargetOptions(
-                            relation,
-                            options
-                        );
-
-                        // return await targetRepository?.deleteAll(
-                        //     ?,
-                        //     targetOptions
-                        // );
-                    }
+            deleteAll = async (where?: Where<T>, options?: CascadeOptions) => {
+                const CascadeContext = new InvocationContext(
+                    undefined as any,
+                    this,
+                    "delete",
+                    Array.from(arguments)
                 );
 
-                return {
-                    count: (await Promise.all(children)).reduce(
-                        (accumulate, item) => accumulate + (item?.count || 0),
-                        result.count
+                return await super.deleteAll(
+                    await config.where(CascadeContext, where || {}),
+                    options
+                );
+            };
+
+            /**
+             * Delete cascade by entity and options.filter
+             */
+            delete = async (entity: T, options?: CascadeOptions) => {
+                await this.deleteAll(
+                    this.entityClass.buildWhereForId(
+                        this.entityClass.getIdOf(entity)
                     ),
-                };
-            }
-            async deleteById(
-                id: ModelID,
-                options?: CascadeOptions
-            ): Promise<void> {
+                    options
+                );
+            };
+
+            /**
+             * Delete cascade by id and options.filter
+             */
+            deleteById = async (id: ID, options?: CascadeOptions) => {
                 await this.deleteAll(
                     this.entityClass.buildWhereForId(id),
                     options
                 );
-            }
+            };
         }
 
-        return Repository as any;
+        return MixedRepository;
     };
 }
