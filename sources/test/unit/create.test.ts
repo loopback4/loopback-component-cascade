@@ -30,10 +30,12 @@ describe("Create Model", async () => {
                 {
                     username: "user2",
                     password: "123",
-                    parent: {
-                        username: "user2Parent",
-                        password: "321",
-                    },
+                    children: [
+                        {
+                            username: "user2Child",
+                            password: "111",
+                        },
+                    ],
                 },
                 {
                     username: "user3",
@@ -54,10 +56,12 @@ describe("Create Model", async () => {
             {
                 username: "user2",
                 password: "123",
-                parent: {
-                    username: "user2Parent",
-                    password: "321",
-                },
+                children: [
+                    {
+                        username: "user2Child",
+                        password: "111",
+                    },
+                ],
             },
             {
                 username: "user3",
@@ -82,10 +86,6 @@ describe("Create Model", async () => {
             await userRepository.create({
                 username: "user1",
                 password: "123",
-                parent: {
-                    username: "parent1",
-                    password: "321",
-                },
                 children: [
                     {
                         username: "child1",
@@ -104,10 +104,6 @@ describe("Create Model", async () => {
         ).containDeep({
             username: "user1",
             password: "123",
-            parent: {
-                username: "parent1",
-                password: "321",
-            },
             children: [
                 {
                     username: "child1",

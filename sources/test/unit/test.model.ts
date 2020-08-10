@@ -26,10 +26,16 @@ export class User extends Entity {
     })
     password: string;
 
-    @belongsTo(() => User)
+    @belongsTo(() => User, {
+        keyFrom: "parentId",
+        keyTo: "id",
+    })
     parentId: string;
 
-    @hasMany(() => User)
+    @hasMany(() => User, {
+        keyFrom: "id",
+        keyTo: "parentId",
+    })
     children: User[];
 
     constructor(data?: Partial<User>) {

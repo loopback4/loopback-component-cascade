@@ -2,6 +2,7 @@ import { MixinTarget } from "@loopback/core";
 import { InvocationContext } from "@loopback/context";
 import {
     DefaultCrudRepository,
+    RelationType,
     DataObject,
     Options,
     Entity,
@@ -76,7 +77,7 @@ export function CascadeRepositoryMixin<
              * return result
              */
             createAll = async (
-                entities: DataObject<T & Relations>[],
+                entities: DataObject<T>[],
                 options?: CascadeOptions
             ) => {
                 // remote navigational properties
@@ -143,22 +144,26 @@ export function CascadeRepositoryMixin<
                         for (let [relation, metadata] of Object.entries(
                             this.entityClass.definition.relations
                         )) {
-                            const keyTo = (metadata as any).keyTo;
                             const keyFrom = (metadata as any).keyFrom;
+                            const keyTo = (metadata as any).keyTo;
+
+                            if (metadata.type === RelationType.belongsTo) {
+                                continue;
+                            }
+
+                            if (!(relation in entity)) {
+                                continue;
+                            }
 
                             if (metadata.targetsMany) {
-                                (model as any)[relation] =
-                                    (entity as any)[relation] &&
-                                    (entity as any)[relation].map(
-                                        (entityItem: any) => ({
-                                            ...entityItem,
-                                            [keyTo]: (model as any)[keyFrom],
-                                        })
-                                    );
-                            } else {
                                 (model as any)[relation] = (entity as any)[
                                     relation
-                                ] && {
+                                ].map((item: any) => ({
+                                    ...item,
+                                    [keyTo]: (model as any)[keyFrom],
+                                }));
+                            } else {
+                                (model as any)[relation] = {
                                     ...(entity as any)[relation],
                                     [keyTo]: (model as any)[keyFrom],
                                 };
@@ -169,38 +174,54 @@ export function CascadeRepositoryMixin<
                     return model;
                 });
 
-                console.log(result);
-
                 for (let [relation, metadata] of Object.entries(
                     this.entityClass.definition.relations
                 )) {
-                    const keyTo = (metadata as any).keyTo;
                     const keyFrom = (metadata as any).keyFrom;
+                    const keyTo = (metadata as any).keyTo;
 
                     const children = entities
                         .map((entity: any) => entity[relation])
                         .flat(1)
                         .filter((entity) => entity);
 
-                    // const childrenResult = await this.createAll(
-                    //     children,
-                    //     options
-                    // );
+                    if (children.length <= 0) {
+                        continue;
+                    }
 
-                    // result = result.map((entity: any) => {
-                    //     if (metadata.targetsMany) {
-                    //         entity[relation] = childrenResult.filter(
-                    //             (child: any) => child[keyFrom] === entity[keyTo]
-                    //         );
-                    //     } else {
-                    //         entity[relation] = childrenResult.filter(
-                    //             (child: any) => child[keyFrom] === entity[keyTo]
-                    //         );
-                    //     }
+                    const target = (await (this as any)
+                        [relation]()
+                        .getTargetRepository()) as DefaultCrudRepository<
+                        any,
+                        any,
+                        any
+                    >;
 
-                    //     return entity;
-                    // });
+                    if (!target) {
+                        continue;
+                    }
+
+                    const childrenResult = await target.createAll(
+                        children,
+                        options
+                    );
+
+                    result = result.map((entity: any) => {
+                        if (metadata.targetsMany) {
+                            entity[relation] = childrenResult.filter(
+                                (child: any) => child[keyTo] === entity[keyFrom]
+                            );
+                        } else {
+                            entity[relation] = childrenResult.filter(
+                                (child: any) => child[keyTo] === entity[keyFrom]
+                            )[0];
+                        }
+
+                        return entity;
+                    });
                 }
+
+                console.log(result);
 
                 return result;
             };
@@ -209,7 +230,7 @@ export function CascadeRepositoryMixin<
              * Cascade create() using createAll()
              */
             create = async (
-                entity: DataObject<T & Relations>,
+                entity: DataObject<T>,
                 options?: CascadeOptions
             ) => {
                 const result = await this.createAll([entity], options);
@@ -221,7 +242,7 @@ export function CascadeRepositoryMixin<
              * Cascade where and update all entities
              */
             updateAll = async (
-                data: DataObject<T & Relations>,
+                data: DataObject<T>,
                 where?: Where<T>,
                 options?: CascadeOptions
             ) => {
@@ -240,7 +261,7 @@ export function CascadeRepositoryMixin<
              */
             updateById = async (
                 id: ID,
-                data: DataObject<T & Relations>,
+                data: DataObject<T>,
                 options?: CascadeOptions
             ) => {
                 await this.updateAll(
@@ -253,10 +274,7 @@ export function CascadeRepositoryMixin<
             /**
              * Cascade update() using updateAll()
              */
-            update = async (
-                entity: T & Relations,
-                options?: CascadeOptions
-            ) => {
+            update = async (entity: T, options?: CascadeOptions) => {
                 await this.updateAll(
                     entity,
                     this.entityClass.buildWhereForId(
@@ -271,7 +289,7 @@ export function CascadeRepositoryMixin<
              */
             replaceById = async (
                 id: ID,
-                data: DataObject<T & Relations>,
+                data: DataObject<T>,
                 options?: CascadeOptions
             ) => {
                 await this.updateAll(

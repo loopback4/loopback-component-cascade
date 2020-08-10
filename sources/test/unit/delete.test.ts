@@ -25,10 +25,12 @@ describe("Delete Model", async () => {
             {
                 username: "user2",
                 password: "123",
-                parent: {
-                    username: "user2Parent",
-                    password: "321",
-                },
+                children: [
+                    {
+                        username: "user2Child",
+                        password: "111",
+                    },
+                ],
             },
             {
                 username: "user3",
@@ -52,10 +54,10 @@ describe("Delete Model", async () => {
                     filter: {
                         include: [
                             {
-                                relation: "parent",
+                                relation: "children",
                                 scope: {
                                     where: {
-                                        username: "user2Parent",
+                                        username: "user2Child",
                                     },
                                 },
                             },
@@ -78,11 +80,12 @@ describe("Delete Model", async () => {
                 id: "2",
                 username: "user2",
                 password: "123",
-                parent: {
-                    id: "4",
-                    username: "user2Parent",
-                    password: "321",
-                },
+                children: [
+                    {
+                        username: "user2Child",
+                        password: "111",
+                    },
+                ],
             },
             {
                 id: "3",
@@ -106,10 +109,10 @@ describe("Delete Model", async () => {
                 filter: {
                     include: [
                         {
-                            relation: "parent",
+                            relation: "children",
                             scope: {
                                 where: {
-                                    username: "user2Parent",
+                                    username: "user2Child",
                                 },
                             },
                         },
@@ -129,10 +132,12 @@ describe("Delete Model", async () => {
             {
                 username: "user2",
                 password: "123",
-                parent: {
-                    username: "user2Parent",
-                    password: "321",
-                },
+                children: [
+                    {
+                        username: "user2Child",
+                        password: "111",
+                    },
+                ],
             },
             {
                 username: "user3",
@@ -154,10 +159,10 @@ describe("Delete Model", async () => {
                 filter: {
                     include: [
                         {
-                            relation: "parent",
+                            relation: "children",
                             scope: {
                                 where: {
-                                    username: "user2Parent",
+                                    username: "user2Child",
                                 },
                             },
                         },
