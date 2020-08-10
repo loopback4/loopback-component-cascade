@@ -80,7 +80,7 @@ export function CascadeRepositoryMixin<
                 options?: CascadeOptions
             ) => {
                 // remote navigational properties
-                const rawEntities = entities.map((entity) =>
+                const rawEntities = entities.map<any>((entity) =>
                     Object.fromEntries(
                         Object.entries(entity).filter(
                             ([_, value]) => typeof value !== "object"
@@ -169,6 +169,8 @@ export function CascadeRepositoryMixin<
                     return model;
                 });
 
+                console.log(result);
+
                 for (let [relation, metadata] of Object.entries(
                     this.entityClass.definition.relations
                 )) {
@@ -180,24 +182,24 @@ export function CascadeRepositoryMixin<
                         .flat(1)
                         .filter((entity) => entity);
 
-                    const childrenResult = await this.createAll(
-                        children,
-                        options
-                    );
+                    // const childrenResult = await this.createAll(
+                    //     children,
+                    //     options
+                    // );
 
-                    result = result.map((entity: any) => {
-                        if (metadata.targetsMany) {
-                            entity[relation] = childrenResult.filter(
-                                (child: any) => child[keyFrom] === entity[keyTo]
-                            );
-                        } else {
-                            entity[relation] = childrenResult.filter(
-                                (child: any) => child[keyFrom] === entity[keyTo]
-                            );
-                        }
+                    // result = result.map((entity: any) => {
+                    //     if (metadata.targetsMany) {
+                    //         entity[relation] = childrenResult.filter(
+                    //             (child: any) => child[keyFrom] === entity[keyTo]
+                    //         );
+                    //     } else {
+                    //         entity[relation] = childrenResult.filter(
+                    //             (child: any) => child[keyFrom] === entity[keyTo]
+                    //         );
+                    //     }
 
-                        return entity;
-                    });
+                    //     return entity;
+                    // });
                 }
 
                 return result;
@@ -327,12 +329,12 @@ export function CascadeRepositoryMixin<
                     );
 
                     if (childrenWhere && childrenFilter && childrenWhere) {
-                        result.count += (
-                            await super.deleteAll(itemsWhere, {
-                                ...options,
-                                filter: itemsFilter,
-                            })
-                        ).count;
+                        // result.count += (
+                        //     await super.deleteAll(itemsWhere, {
+                        //         ...options,
+                        //         filter: itemsFilter,
+                        //     })
+                        // ).count;
                     }
                 }
 
