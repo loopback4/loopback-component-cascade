@@ -67,7 +67,7 @@ export function CascadeRepositoryMixin<
             implements CascadeRepository<T, ID, Relations> {
             /**
              * result = Create parents
-             * result = map to entity
+             * result = map(find related entity)
              * for each entity relations
              *      children = map(result[relation])
              *      children = flat(1)
@@ -76,31 +76,128 @@ export function CascadeRepositoryMixin<
              * return result
              */
             createAll = async (
-                entities: DataObject<T>[],
+                entities: DataObject<T & Relations>[],
                 options?: CascadeOptions
             ) => {
-                // TODO: remote navigational properties
-                let result = await super.createAll(entities, options);
+                // remote navigational properties
+                const rawEntities = entities.map((entity) =>
+                    Object.fromEntries(
+                        Object.entries(entity).filter(
+                            ([_, value]) => typeof value !== "object"
+                        )
+                    )
+                );
+
+                let result = await super.createAll(rawEntities, options);
+
+                result = result.map((model) => {
+                    // find entity for each result and bind together
+                    const entity = entities.reduce<DataObject<T> | undefined>(
+                        (accumulate, entity) => {
+                            const checkableProperties = Object.entries(
+                                this.entityClass.definition.properties
+                            )
+                                .filter(([key, value]) => {
+                                    if (value.id) {
+                                        return false;
+                                    }
+
+                                    if (key in entity) {
+                                        return true;
+                                    }
+
+                                    if (
+                                        "default" in value ||
+                                        "defaultFn" in value
+                                    ) {
+                                        return false;
+                                    }
+
+                                    return true;
+                                })
+                                .map(([key, _]) => key);
+
+                            const equals = checkableProperties.reduce<boolean>(
+                                (accumulate, property) => {
+                                    return (
+                                        accumulate &&
+                                        (entity as any)[property] ===
+                                            (model as any)[property]
+                                    );
+                                },
+                                true
+                            );
+
+                            if (equals) {
+                                return entity;
+                            } else {
+                                return accumulate;
+                            }
+                        },
+                        undefined
+                    );
+
+                    // model where found
+                    // map entity relations and add parent keyFrom, keyTo
+                    if (entity) {
+                        for (let [relation, metadata] of Object.entries(
+                            this.entityClass.definition.relations
+                        )) {
+                            const keyTo = (metadata as any).keyTo;
+                            const keyFrom = (metadata as any).keyFrom;
+
+                            if (metadata.targetsMany) {
+                                (model as any)[relation] =
+                                    (entity as any)[relation] &&
+                                    (entity as any)[relation].map(
+                                        (entityItem: any) => ({
+                                            ...entityItem,
+                                            [keyTo]: (model as any)[keyFrom],
+                                        })
+                                    );
+                            } else {
+                                (model as any)[relation] = (entity as any)[
+                                    relation
+                                ] && {
+                                    ...(entity as any)[relation],
+                                    [keyTo]: (model as any)[keyFrom],
+                                };
+                            }
+                        }
+                    }
+
+                    return model;
+                });
 
                 for (let [relation, metadata] of Object.entries(
                     this.entityClass.definition.relations
                 )) {
-                    // TODO: find parent model in result
-                    const itemsEntities = entities
+                    const keyTo = (metadata as any).keyTo;
+                    const keyFrom = (metadata as any).keyFrom;
+
+                    const children = entities
                         .map((entity: any) => entity[relation])
                         .flat(1)
-                        .map((entity) => ({
-                            ...entity,
-                            [(metadata as any).keyFrom]: (result[-100] as any)[
-                                (metadata as any).keyTo
-                            ],
-                        }));
+                        .filter((entity) => entity);
 
-                    // TODO: if target not supports cascade, remove navigational properties
-                    (result[-100] as any)[relation] = await super.createAll(
-                        itemsEntities,
+                    const childrenResult = await this.createAll(
+                        children,
                         options
                     );
+
+                    result = result.map((entity: any) => {
+                        if (metadata.targetsMany) {
+                            entity[relation] = childrenResult.filter(
+                                (child: any) => child[keyFrom] === entity[keyTo]
+                            );
+                        } else {
+                            entity[relation] = childrenResult.filter(
+                                (child: any) => child[keyFrom] === entity[keyTo]
+                            );
+                        }
+
+                        return entity;
+                    });
                 }
 
                 return result;
@@ -110,7 +207,7 @@ export function CascadeRepositoryMixin<
              * Cascade create() using createAll()
              */
             create = async (
-                entity: DataObject<T>,
+                entity: DataObject<T & Relations>,
                 options?: CascadeOptions
             ) => {
                 const result = await this.createAll([entity], options);
@@ -122,7 +219,7 @@ export function CascadeRepositoryMixin<
              * Cascade where and update all entities
              */
             updateAll = async (
-                data: DataObject<T>,
+                data: DataObject<T & Relations>,
                 where?: Where<T>,
                 options?: CascadeOptions
             ) => {
@@ -141,7 +238,7 @@ export function CascadeRepositoryMixin<
              */
             updateById = async (
                 id: ID,
-                data: DataObject<T>,
+                data: DataObject<T & Relations>,
                 options?: CascadeOptions
             ) => {
                 await this.updateAll(
@@ -154,7 +251,10 @@ export function CascadeRepositoryMixin<
             /**
              * Cascade update() using updateAll()
              */
-            update = async (entity: T, options?: CascadeOptions) => {
+            update = async (
+                entity: T & Relations,
+                options?: CascadeOptions
+            ) => {
                 await this.updateAll(
                     entity,
                     this.entityClass.buildWhereForId(
@@ -169,7 +269,7 @@ export function CascadeRepositoryMixin<
              */
             replaceById = async (
                 id: ID,
-                data: DataObject<T>,
+                data: DataObject<T & Relations>,
                 options?: CascadeOptions
             ) => {
                 await this.updateAll(
@@ -202,21 +302,23 @@ export function CascadeRepositoryMixin<
                     ),
                 } as any;
 
-                const items = await super.find({ where: where }, options);
+                const parents = await super.find({ where: where }, options);
 
                 let result = await super.deleteAll(where, options);
 
                 for (const [relation, metadata] of Object.entries(
                     this.entityClass.definition.relations
                 )) {
-                    const itemsWhere = {
+                    const childrenWhere = {
                         [(metadata as any).keyTo]: {
-                            inq: items.map(
+                            inq: parents.map(
                                 (item: any) => item[(metadata as any).keyFrom]
                             ),
                         },
                     };
-                    const itemsFilter = (options?.filter?.include || []).reduce(
+                    const childrenFilter = (
+                        options?.filter?.include || []
+                    ).reduce(
                         (accumulate: any, item) =>
                             item.relation === relation
                                 ? item.scope
@@ -224,7 +326,7 @@ export function CascadeRepositoryMixin<
                         undefined
                     );
 
-                    if (itemsWhere && itemsFilter) {
+                    if (childrenWhere && childrenFilter && childrenWhere) {
                         result.count += (
                             await super.deleteAll(itemsWhere, {
                                 ...options,

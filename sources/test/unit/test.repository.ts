@@ -1,3 +1,4 @@
+import { Constructor } from "@loopback/core";
 import {
     juggler,
     Getter,
@@ -6,9 +7,17 @@ import {
     DefaultCrudRepository,
 } from "@loopback/repository";
 
-import { User } from "./test.model";
+import { CascadeRepositoryMixin } from "../../src";
 
-export class UserRepository extends DefaultCrudRepository<User, string, {}> {
+import { User, UserRelations } from "./test.model";
+
+export class UserRepository extends CascadeRepositoryMixin<
+    User,
+    string,
+    UserRelations
+>()<Constructor<DefaultCrudRepository<User, string, UserRelations>>>(
+    DefaultCrudRepository
+) {
     public readonly parent: BelongsToAccessor<User, typeof User.prototype.id>;
 
     constructor(
