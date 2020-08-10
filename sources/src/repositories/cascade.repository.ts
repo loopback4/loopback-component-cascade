@@ -66,33 +66,26 @@ export function CascadeRepositoryMixin<
         class MixedRepository extends superClass
             implements CascadeRepository<T, ID, Relations> {
             /**
-             * Check entity unique fields
-             * and set `uid`, `beginDate`, `endDate`, `id` to undefined
-             * then create entity
-             */
-            create = async (
-                entity: DataObject<T>,
-                options?: CascadeOptions
-            ) => {
-                const result = await this.createAll([entity], options);
-
-                return result[0];
-            };
-
-            /**
-             * Check entities unique fields
-             * and set `uid`, `beginDate`, `endDate`, `id` to undefined
-             * then create entities
+             * result = Create parents
+             * result = map to entity
+             * for each entity relations
+             *      children = map(result[relation])
+             *      children = flat(1)
+             *      children = map({...entity, [keyFrom]: keyTo})
+             *      result = target.createAll(children, options)
+             * return result
              */
             createAll = async (
                 entities: DataObject<T>[],
                 options?: CascadeOptions
             ) => {
+                // TODO: remote navigational properties
                 let result = await super.createAll(entities, options);
 
                 for (let [relation, metadata] of Object.entries(
                     this.entityClass.definition.relations
                 )) {
+                    // TODO: find parent model in result
                     const itemsEntities = entities
                         .map((entity: any) => entity[relation])
                         .flat(1)
@@ -103,6 +96,7 @@ export function CascadeRepositoryMixin<
                             ],
                         }));
 
+                    // TODO: if target not supports cascade, remove navigational properties
                     (result[-100] as any)[relation] = await super.createAll(
                         itemsEntities,
                         options
@@ -110,6 +104,18 @@ export function CascadeRepositoryMixin<
                 }
 
                 return result;
+            };
+
+            /**
+             * Cascade create() using createAll()
+             */
+            create = async (
+                entity: DataObject<T>,
+                options?: CascadeOptions
+            ) => {
+                const result = await this.createAll([entity], options);
+
+                return result[0];
             };
 
             /**
@@ -127,15 +133,11 @@ export function CascadeRepositoryMixin<
                     Array.from(arguments)
                 );
 
-                return await super.updateAll(
-                    data,
-                    await config.where(CascadeContext, where || {}),
-                    options
-                );
+                return await super.updateAll(data, where, options);
             };
 
             /**
-             * Cascade id and update one entity
+             * Cascade updateById() using updateAll()
              */
             updateById = async (
                 id: ID,
@@ -150,7 +152,7 @@ export function CascadeRepositoryMixin<
             };
 
             /**
-             * Cascade id and update one entity
+             * Cascade update() using updateAll()
              */
             update = async (entity: T, options?: CascadeOptions) => {
                 await this.updateAll(
@@ -163,7 +165,7 @@ export function CascadeRepositoryMixin<
             };
 
             /**
-             * Cascade id and replace one entity
+             * Cascade replaceById() using updateAll()
              */
             replaceById = async (
                 id: ID,
@@ -185,7 +187,13 @@ export function CascadeRepositoryMixin<
             };
 
             /**
-             * Delete cascade by where and options.filter
+             * Select parents by where and filter.where
+             * result = delete parents by where and filter.where
+             * for each entity relations
+             *      where = {[keyFrom]: {inq: parents[keyTo]}}
+             *      filter = filter.include[relation].scope
+             *      result += target.deleteAll(where, {...options, filter})
+             * return result
              */
             deleteAll = async (where?: Where<T>, options?: CascadeOptions) => {
                 where = {
@@ -230,7 +238,7 @@ export function CascadeRepositoryMixin<
             };
 
             /**
-             * Delete cascade by entity and options.filter
+             * Cascade delete() using deleteAll()
              */
             delete = async (entity: T, options?: CascadeOptions) => {
                 await this.deleteAll(
@@ -242,7 +250,7 @@ export function CascadeRepositoryMixin<
             };
 
             /**
-             * Delete cascade by id and options.filter
+             * Cascade deleteById() using deleteAll()
              */
             deleteById = async (id: ID, options?: CascadeOptions) => {
                 await this.deleteAll(
