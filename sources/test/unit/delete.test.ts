@@ -49,7 +49,9 @@ describe("Delete Model", async () => {
          */
         expect(
             await userRepository.deleteAll(
-                {},
+                {
+                    username: { inq: ["user1", "user2", "user3"] },
+                },
                 {
                     filter: {
                         include: [
@@ -100,36 +102,37 @@ describe("Delete Model", async () => {
                 ],
             },
         ]);
+        await userRepository.delete(new User({ id: "2" }), {
+            filter: {
+                include: [
+                    {
+                        relation: "children",
+                        scope: {
+                            where: {
+                                username: "user2Child",
+                            },
+                        },
+                    },
+                ],
+            },
+        });
 
         /**
          * Test delete one user by entity with relations
          */
-        expect(
-            await userRepository.delete(new User({ id: "2" }), {
-                filter: {
-                    include: [
-                        {
-                            relation: "children",
-                            scope: {
-                                where: {
-                                    username: "user2Child",
-                                },
-                            },
-                        },
-                    ],
-                },
-            })
-        ).containDeep({ count: 2 });
+        expect(await userRepository.count()).containDeep({ count: 3 });
     });
 
     it("deleteById() Test", async () => {
         await userRepository.deleteAll();
         await userRepository.createAll([
             {
+                id: "1",
                 username: "user1",
                 password: "123",
             },
             {
+                id: "2",
                 username: "user2",
                 password: "123",
                 children: [
@@ -140,35 +143,36 @@ describe("Delete Model", async () => {
                 ],
             },
             {
+                id: "3",
                 username: "user3",
                 password: "123",
                 children: [
                     {
+                        id: "5",
                         username: "user3Child",
                         password: "111",
                     },
                 ],
             },
         ]);
+        await userRepository.deleteById("2", {
+            filter: {
+                include: [
+                    {
+                        relation: "children",
+                        scope: {
+                            where: {
+                                username: "user2Child",
+                            },
+                        },
+                    },
+                ],
+            },
+        });
 
         /**
          * Test delete one user by id with relations
          */
-        expect(
-            await userRepository.deleteById("2", {
-                filter: {
-                    include: [
-                        {
-                            relation: "children",
-                            scope: {
-                                where: {
-                                    username: "user2Child",
-                                },
-                            },
-                        },
-                    ],
-                },
-            })
-        ).containDeep({ count: 2 });
+        expect(await userRepository.count()).containDeep({ count: 3 });
     });
 });

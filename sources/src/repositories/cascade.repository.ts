@@ -1,5 +1,5 @@
 import { MixinTarget } from "@loopback/core";
-import { InvocationContext } from "@loopback/context";
+import { InvocationContext, composeInterceptors } from "@loopback/context";
 import {
     DefaultCrudRepository,
     RelationType,
@@ -180,7 +180,7 @@ export function CascadeRepositoryMixin<
                     const keyFrom = (metadata as any).keyFrom;
                     const keyTo = (metadata as any).keyTo;
 
-                    const children = entities
+                    const children = result
                         .map((entity: any) => entity[relation])
                         .flat(1)
                         .filter((entity) => entity);
@@ -220,8 +220,6 @@ export function CascadeRepositoryMixin<
                         return entity;
                     });
                 }
-
-                console.log(result);
 
                 return result;
             };
@@ -331,11 +329,15 @@ export function CascadeRepositoryMixin<
                 )) {
                     const childrenWhere = {
                         [(metadata as any).keyTo]: {
-                            inq: parents.map(
-                                (item: any) => item[(metadata as any).keyFrom]
-                            ),
+                            inq: parents
+                                .map(
+                                    (item: any) =>
+                                        item[(metadata as any).keyFrom]
+                                )
+                                .filter((item) => item),
                         },
                     };
+
                     const childrenFilter = (
                         options?.filter?.include || []
                     ).reduce(
@@ -347,12 +349,24 @@ export function CascadeRepositoryMixin<
                     );
 
                     if (childrenWhere && childrenFilter && childrenWhere) {
-                        // result.count += (
-                        //     await super.deleteAll(itemsWhere, {
-                        //         ...options,
-                        //         filter: itemsFilter,
-                        //     })
-                        // ).count;
+                        const target = (await (this as any)
+                            [relation]()
+                            .getTargetRepository()) as DefaultCrudRepository<
+                            any,
+                            any,
+                            any
+                        >;
+
+                        if (!target) {
+                            continue;
+                        }
+
+                        result.count += (
+                            await target.deleteAll(childrenWhere, {
+                                ...options,
+                                filter: childrenFilter,
+                            })
+                        ).count;
                     }
                 }
 
