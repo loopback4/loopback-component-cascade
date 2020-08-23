@@ -1,5 +1,4 @@
 import { MixinTarget } from "@loopback/core";
-import { InvocationContext, composeInterceptors } from "@loopback/context";
 import {
     DefaultCrudRepository,
     RelationType,
@@ -7,12 +6,7 @@ import {
     Options,
     Entity,
     Where,
-    Filter,
 } from "@loopback/repository";
-
-export interface CascadeOptions extends Options {
-    filter?: Filter<any>;
-}
 
 /**
  * This interface contains additional types added to CascadeRepositoryMixin type
@@ -21,7 +15,13 @@ export interface CascadeRepository<
     T extends Entity,
     ID,
     Relations extends object = {}
-> {}
+> {
+    cascadeClear(entity: DataObject<T>): DataObject<T>;
+    cascadeFind(
+        createdEntity: DataObject<T>,
+        entities: DataObject<T>[]
+    ): DataObject<T>;
+}
 
 /**
  *  +--------+
@@ -34,16 +34,6 @@ export interface CascadeRepository<
  *  +-----------+
  *
  *
- *  +--------+    +------------+   +-------------+
- *  | update |    | updateById |   | replaceById |
- *  +----+---+    +-----+------+   +-------+-----+
- *       |              |                  |
- *       |              |                  |
- *       |        +-----v-----+            |
- *       +--------> updateAll <------------+
- *                +-----------+
- *
- *
  *  +--------+    +------------+
  *  | delete |    | deleteById |
  *  +--+-----+    +------+-----+
@@ -54,7 +44,7 @@ export interface CascadeRepository<
  *        +-----------+
  */
 /**
- * Cascade repository mixin, add Create, Update, Delete operations supporting Cascade
+ * Cascade repository mixin, add Create, Delete operations supporting Cascade
  */
 export function CascadeRepositoryMixin<
     T extends Entity,
@@ -67,6 +57,86 @@ export function CascadeRepositoryMixin<
         class MixedRepository extends superClass
             implements CascadeRepository<T, ID, Relations> {
             /**
+             * remove navigational properties from entity
+             */
+            cascadeClear = (entity: DataObject<T>) => {
+                return Object.fromEntries(
+                    Object.entries(entity).filter(
+                        ([_, value]) => typeof value !== "object"
+                    )
+                );
+            };
+
+            /**
+             * find matched entity for createdEntity by properties equality
+             */
+            cascadeFind = (
+                createdEntity: DataObject<T>,
+                entities: DataObject<T>[]
+            ) => {
+                // Check two models have same properties
+                const equalProperty = (
+                    property: string,
+                    metadata: any,
+                    entity: DataObject<T>
+                ) => {
+                    // Check entity before save has property, then return equality
+                    if (property in entity) {
+                        return (
+                            (createdEntity as any)[property] ===
+                            (entity as any)[property]
+                        );
+                    }
+
+                    // Check entity before save hasn't property and has default value
+                    // So it were filled automatically, properties are equal
+                    if ("default" in metadata || "defaultFn" in metadata) {
+                        return true;
+                    }
+
+                    // Entity before save hasn't property and has not default value
+                    // But saved model has value
+                    return false;
+                };
+
+                // Find one matched entity for createdEntity
+                const entity = entities
+                    .filter((entity) =>
+                        // Check createdEntity and entity have equal by properties
+                        Object.entries(
+                            this.entityClass.definition.properties
+                        ).reduce<boolean>(
+                            (accumulate, [property, metadata]) =>
+                                accumulate &&
+                                equalProperty(
+                                    property,
+                                    metadata,
+                                    createdEntity,
+                                    entity
+                                ),
+                            true
+                        )
+                    )
+                    .pop();
+
+                // Find raw model's entity
+                const entity = findEntity(model);
+
+                // Get entity relations
+                const entityRelations = Object.fromEntries(
+                    Object.entries(entity || {}).filter(
+                        ([_, value]) => typeof value === "object"
+                    )
+                );
+
+                // Add entity relations to raw model
+                return {
+                    ...model,
+                    ...entityRelations,
+                };
+            };
+
+            /**
              * result = Create parents
              * result = map(find related entity)
              * for each entity relations
@@ -74,120 +144,33 @@ export function CascadeRepositoryMixin<
              *      children = flat(1)
              *      children = map({...entity, [keyFrom]: keyTo})
              *      result = target.createAll(children, options)
+             *      result = result.add(children)
              * return result
              */
             createAll = async (
                 entities: DataObject<T>[],
-                options?: CascadeOptions
+                options?: Options
             ) => {
-                // remote navigational properties
-                const rawEntities = entities.map<any>((entity) =>
-                    Object.fromEntries(
-                        Object.entries(entity).filter(
-                            ([_, value]) => typeof value !== "object"
-                        )
-                    )
+                // Create entities without navigational properties
+                let result = await super.createAll(
+                    entities.map((entity) => this.cascadeClear(entity)),
+                    options
                 );
 
-                let result = await super.createAll(rawEntities, options);
+                // Find and add navigational properties for each created entity
+                result = result.map((createdEntity) =>
+                    this.cascadeFind(createdEntity, entities)
+                );
 
-                result = result.map((model) => {
-                    // find entity for each result and bind together
-                    const entity = entities.reduce<DataObject<T> | undefined>(
-                        (accumulate, entity) => {
-                            const checkableProperties = Object.entries(
-                                this.entityClass.definition.properties
-                            )
-                                .filter(([key, value]) => {
-                                    if (value.id) {
-                                        return false;
-                                    }
-
-                                    if (key in entity) {
-                                        return true;
-                                    }
-
-                                    if (
-                                        "default" in value ||
-                                        "defaultFn" in value
-                                    ) {
-                                        return false;
-                                    }
-
-                                    return true;
-                                })
-                                .map(([key, _]) => key);
-
-                            const equals = checkableProperties.reduce<boolean>(
-                                (accumulate, property) => {
-                                    return (
-                                        accumulate &&
-                                        (entity as any)[property] ===
-                                            (model as any)[property]
-                                    );
-                                },
-                                true
-                            );
-
-                            if (equals) {
-                                return entity;
-                            } else {
-                                return accumulate;
-                            }
-                        },
-                        undefined
-                    );
-
-                    // model where found
-                    // map entity relations and add parent keyFrom, keyTo
-                    if (entity) {
-                        for (let [relation, metadata] of Object.entries(
-                            this.entityClass.definition.relations
-                        )) {
-                            const keyFrom = (metadata as any).keyFrom;
-                            const keyTo = (metadata as any).keyTo;
-
-                            if (metadata.type === RelationType.belongsTo) {
-                                continue;
-                            }
-
-                            if (!(relation in entity)) {
-                                continue;
-                            }
-
-                            if (metadata.targetsMany) {
-                                (model as any)[relation] = (entity as any)[
-                                    relation
-                                ].map((item: any) => ({
-                                    ...item,
-                                    [keyTo]: (model as any)[keyFrom],
-                                }));
-                            } else {
-                                (model as any)[relation] = {
-                                    ...(entity as any)[relation],
-                                    [keyTo]: (model as any)[keyFrom],
-                                };
-                            }
-                        }
-                    }
-
-                    return model;
-                });
-
-                for (let [relation, metadata] of Object.entries(
+                const cascadeCreateRelations = Object.entries(
                     this.entityClass.definition.relations
-                )) {
+                ).filter(([_, metadata]) =>
+                    ((metadata as any).cascade || []).includes("create")
+                );
+
+                for (let [relation, metadata] of cascadeCreateRelations) {
                     const keyFrom = (metadata as any).keyFrom;
                     const keyTo = (metadata as any).keyTo;
-
-                    const children = result
-                        .map((entity: any) => entity[relation])
-                        .flat(1)
-                        .filter((entity) => entity);
-
-                    if (children.length <= 0) {
-                        continue;
-                    }
 
                     const target = (await (this as any)
                         [relation]()
@@ -196,16 +179,36 @@ export function CascadeRepositoryMixin<
                         any,
                         any
                     >;
-
                     if (!target) {
                         continue;
                     }
 
+                    let children = result
+                        .map((entity: any) =>
+                            [entity[relation]].flat(1).map((child) => ({
+                                ...child,
+                                [keyTo]: entity[keyFrom],
+                            }))
+                        )
+                        .flat(1)
+                        .filter((entity) => entity);
+                    if (!("cascadeClear" in target)) {
+                        // If target repository doesn't support cascade, remove navigational properties
+                        children = children.map((child) =>
+                            this.cascadeClear(child)
+                        );
+                    }
+                    if (children.length <= 0) {
+                        continue;
+                    }
+
+                    // Create children models
                     const childrenResult = await target.createAll(
                         children,
                         options
                     );
 
+                    // Add created children to parents in result
                     result = result.map((entity: any) => {
                         if (metadata.targetsMany) {
                             entity[relation] = childrenResult.filter(
@@ -227,147 +230,62 @@ export function CascadeRepositoryMixin<
             /**
              * Cascade create() using createAll()
              */
-            create = async (
-                entity: DataObject<T>,
-                options?: CascadeOptions
-            ) => {
+            create = async (entity: DataObject<T>, options?: Options) => {
                 const result = await this.createAll([entity], options);
 
                 return result[0];
             };
 
             /**
-             * Cascade where and update all entities
-             */
-            updateAll = async (
-                data: DataObject<T>,
-                where?: Where<T>,
-                options?: CascadeOptions
-            ) => {
-                const CascadeContext = new InvocationContext(
-                    undefined as any,
-                    this,
-                    "update",
-                    Array.from(arguments)
-                );
-
-                return await super.updateAll(data, where, options);
-            };
-
-            /**
-             * Cascade updateById() using updateAll()
-             */
-            updateById = async (
-                id: ID,
-                data: DataObject<T>,
-                options?: CascadeOptions
-            ) => {
-                await this.updateAll(
-                    data,
-                    this.entityClass.buildWhereForId(id),
-                    options
-                );
-            };
-
-            /**
-             * Cascade update() using updateAll()
-             */
-            update = async (entity: T, options?: CascadeOptions) => {
-                await this.updateAll(
-                    entity,
-                    this.entityClass.buildWhereForId(
-                        this.entityClass.getIdOf(entity)
-                    ),
-                    options
-                );
-            };
-
-            /**
-             * Cascade replaceById() using updateAll()
-             */
-            replaceById = async (
-                id: ID,
-                data: DataObject<T>,
-                options?: CascadeOptions
-            ) => {
-                await this.updateAll(
-                    {
-                        ...Object.fromEntries(
-                            Object.entries(
-                                this.entityClass.definition.properties
-                            ).map(([key, _]) => [key, undefined])
-                        ),
-                        ...data,
-                    },
-                    this.entityClass.buildWhereForId(id),
-                    options
-                );
-            };
-
-            /**
-             * Select parents by where and filter.where
-             * result = delete parents by where and filter.where
-             * for each entity relations
-             *      where = {[keyFrom]: {inq: parents[keyTo]}}
-             *      filter = filter.include[relation].scope
-             *      result += target.deleteAll(where, {...options, filter})
+             * Select parents by where
+             * result = delete parents by where
+             * for each entity, delete cascade relations
+             *      childrenWhere = {[keyFrom]: {inq: parents[keyTo]}}
+             *      result += target.deleteAll(childrenWhere, options)
              * return result
              */
-            deleteAll = async (where?: Where<T>, options?: CascadeOptions) => {
-                where = {
-                    and: [where, options?.filter?.where].filter(
-                        (condition) => condition
-                    ),
-                } as any;
-
+            deleteAll = async (where?: Where<T>, options?: Options) => {
                 const parents = await super.find({ where: where }, options);
 
                 let result = await super.deleteAll(where, options);
 
-                for (const [relation, metadata] of Object.entries(
+                const cascadeDeleteRelations = Object.entries(
                     this.entityClass.definition.relations
-                )) {
+                ).filter(([_, metadata]) =>
+                    ((metadata as any).cascade || []).includes("delete")
+                );
+
+                for (const [relation, metadata] of cascadeDeleteRelations) {
+                    const keyFrom = (metadata as any).keyFrom;
+                    const keyTo = (metadata as any).keyTo;
+
+                    const parentsIds = parents
+                        .map((item: any) => item[keyFrom])
+                        .filter((item) => item);
+                    if (parentsIds.length <= 0) {
+                        continue;
+                    }
+
+                    const target = (await (this as any)
+                        [relation]()
+                        .getTargetRepository()) as DefaultCrudRepository<
+                        any,
+                        any,
+                        any
+                    >;
+                    if (!target) {
+                        continue;
+                    }
+
                     const childrenWhere = {
-                        [(metadata as any).keyTo]: {
-                            inq: parents
-                                .map(
-                                    (item: any) =>
-                                        item[(metadata as any).keyFrom]
-                                )
-                                .filter((item) => item),
+                        [keyTo]: {
+                            inq: parentsIds,
                         },
                     };
 
-                    const childrenFilter = (
-                        options?.filter?.include || []
-                    ).reduce(
-                        (accumulate: any, item) =>
-                            item.relation === relation
-                                ? item.scope
-                                : accumulate,
-                        undefined
-                    );
-
-                    if (childrenWhere && childrenFilter && childrenWhere) {
-                        const target = (await (this as any)
-                            [relation]()
-                            .getTargetRepository()) as DefaultCrudRepository<
-                            any,
-                            any,
-                            any
-                        >;
-
-                        if (!target) {
-                            continue;
-                        }
-
-                        result.count += (
-                            await target.deleteAll(childrenWhere, {
-                                ...options,
-                                filter: childrenFilter,
-                            })
-                        ).count;
-                    }
+                    result.count += (
+                        await target.deleteAll(childrenWhere, options)
+                    ).count;
                 }
 
                 return result;
@@ -376,7 +294,7 @@ export function CascadeRepositoryMixin<
             /**
              * Cascade delete() using deleteAll()
              */
-            delete = async (entity: T, options?: CascadeOptions) => {
+            delete = async (entity: T, options?: Options) => {
                 await this.deleteAll(
                     this.entityClass.buildWhereForId(
                         this.entityClass.getIdOf(entity)
@@ -388,7 +306,7 @@ export function CascadeRepositoryMixin<
             /**
              * Cascade deleteById() using deleteAll()
              */
-            deleteById = async (id: ID, options?: CascadeOptions) => {
+            deleteById = async (id: ID, options?: Options) => {
                 await this.deleteAll(
                     this.entityClass.buildWhereForId(id),
                     options
