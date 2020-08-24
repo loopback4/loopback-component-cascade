@@ -17,10 +17,7 @@ export interface CascadeRepository<
     Relations extends object = {}
 > {
     cascadeClear(entity: DataObject<T>): DataObject<T>;
-    cascadeFind(
-        createdEntity: DataObject<T>,
-        entities: DataObject<T>[]
-    ): DataObject<T>;
+    cascadeFind(createdEntity: T, entities: DataObject<T>[]): T;
 }
 
 /**
@@ -64,16 +61,14 @@ export function CascadeRepositoryMixin<
                     Object.entries(entity).filter(
                         ([_, value]) => typeof value !== "object"
                     )
-                );
+                ) as DataObject<T>;
             };
 
             /**
              * find matched entity for createdEntity by properties equality
+             * add matched entity relations to createdEntity
              */
-            cascadeFind = (
-                createdEntity: DataObject<T>,
-                entities: DataObject<T>[]
-            ) => {
+            cascadeFind = (createdEntity: T, entities: DataObject<T>[]) => {
                 // Check two models have same properties
                 const equalProperty = (
                     property: string,
@@ -108,19 +103,11 @@ export function CascadeRepositoryMixin<
                         ).reduce<boolean>(
                             (accumulate, [property, metadata]) =>
                                 accumulate &&
-                                equalProperty(
-                                    property,
-                                    metadata,
-                                    createdEntity,
-                                    entity
-                                ),
+                                equalProperty(property, metadata, entity),
                             true
                         )
                     )
                     .pop();
-
-                // Find raw model's entity
-                const entity = findEntity(model);
 
                 // Get entity relations
                 const entityRelations = Object.fromEntries(
@@ -131,9 +118,9 @@ export function CascadeRepositoryMixin<
 
                 // Add entity relations to raw model
                 return {
-                    ...model,
+                    ...createdEntity,
                     ...entityRelations,
-                };
+                } as T;
             };
 
             /**
@@ -151,6 +138,8 @@ export function CascadeRepositoryMixin<
                 entities: DataObject<T>[],
                 options?: Options
             ) => {
+                // Create belongsTo relations
+
                 // Create entities without navigational properties
                 let result = await super.createAll(
                     entities.map((entity) => this.cascadeClear(entity)),
