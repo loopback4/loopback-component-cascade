@@ -2,7 +2,7 @@
 
 [![Build Status](https://travis-ci.com/loopback4/loopback-component-cascade.svg?branch=master)](https://travis-ci.com/loopback4/loopback-component-cascade)
 
-Using this simple extension you can cascade models create, update, delete in repository level.
+Using this simple extension you can cascade models create in repository level.
 
 ---
 

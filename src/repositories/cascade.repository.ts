@@ -29,19 +29,9 @@ export interface CascadeRepository<
  *  +----v------+
  *  | createAll |
  *  +-----------+
- *
- *
- *  +--------+    +------------+
- *  | delete |    | deleteById |
- *  +--+-----+    +------+-----+
- *     |                 |
- *     |                 |
- *     |  +-----------+  |
- *     +--> deleteAll <--+
- *        +-----------+
  */
 /**
- * Cascade repository mixin, add Create, Delete operations supporting Cascade
+ * Cascade repository mixin, add Create operations supporting Cascade
  */
 export function CascadeRepositoryMixin<
     T extends Entity,
@@ -154,64 +144,71 @@ export function CascadeRepositoryMixin<
 
                 const cascadeCreateRelations = Object.entries(
                     this.entityClass.definition.relations
-                ).filter(([_, metadata]) =>
-                    ((metadata as any).cascade || []).includes("create")
                 );
 
                 for (let [relation, metadata] of cascadeCreateRelations) {
                     const keyFrom = (metadata as any).keyFrom;
                     const keyTo = (metadata as any).keyTo;
 
-                    const target = (await (this as any)
-                        [relation]()
-                        .getTargetRepository()) as DefaultCrudRepository<
-                        any,
-                        any,
-                        any
-                    >;
-                    if (!target) {
-                        continue;
-                    }
+                    console.log("BBBBBB");
+                    console.log((this as any)[relation]());
 
-                    let children = result
-                        .map((entity: any) =>
-                            [entity[relation]].flat(1).map((child) => ({
-                                ...child,
-                                [keyTo]: entity[keyFrom],
-                            }))
-                        )
-                        .flat(1)
-                        .filter((entity) => entity);
-                    if (!("cascadeClear" in target)) {
-                        // If target repository doesn't support cascade, remove navigational properties
-                        children = children.map((child) =>
-                            this.cascadeClear(child)
-                        );
-                    }
-                    if (children.length <= 0) {
-                        continue;
-                    }
+                    // const target = (await (this as any)
+                    //     [relation]()
+                    //     .getTargetRepository()) as DefaultCrudRepository<
+                    //     any,
+                    //     any,
+                    //     any
+                    // >;
 
-                    // Create children models
-                    const childrenResult = await target.createAll(
-                        children,
-                        options
-                    );
+                    // console.log(target);
+                    // console.log(relation);
 
-                    // Add created children to parents in result
-                    result = result.map((entity: any) => {
-                        if (metadata.targetsMany) {
-                            entity[relation] = childrenResult.filter(
-                                (child: any) => child[keyTo] === entity[keyFrom]
-                            );
-                        } else {
-                            entity[relation] = childrenResult.filter(
-                                (child: any) => child[keyTo] === entity[keyFrom]
-                            )[0];
-                        }
+                    // if (!target) {
+                    //     continue;
+                    // }
 
-                        return entity;
-                    });
+                    // console.log("AAAAA");
+
+                    // let children = result
+                    //     .map((entity: any) =>
+                    //         [entity[relation]].flat(1).map((child) => ({
+                    //             ...child,
+                    //             [keyTo]: entity[keyFrom],
+                    //         }))
+                    //     )
+                    //     .flat(1)
+                    //     .filter((entity) => entity);
+                    // if (!("cascadeClear" in target)) {
+                    //     // If target repository doesn't support cascade, remove navigational properties
+                    //     children = children.map((child) =>
+                    //         this.cascadeClear(child)
+                    //     );
+                    // }
+                    // if (children.length <= 0) {
+                    //     continue;
+                    // }
+
+                    // // Create children models
+                    // const childrenResult = await target.createAll(
+                    //     children,
+                    //     options
+                    // );
+
+                    // // Add created children to parents in result
+                    // result = result.map((entity: any) => {
+                    //     if (metadata.targetsMany) {
+                    //         entity[relation] = childrenResult.filter(
+                    //             (child: any) => child[keyTo] === entity[keyFrom]
+                    //         );
+                    //     } else {
+                    //         entity[relation] = childrenResult.filter(
+                    //             (child: any) => child[keyTo] === entity[keyFrom]
+                    //         )[0];
+                    //     }
+
+                    //     return entity;
+                    // });
                 }
 
                 return result;
@@ -224,83 +221,6 @@ export function CascadeRepositoryMixin<
                 const result = await this.createAll([entity], options);
 
                 return result[0];
-            };
-
-            /**
-             * Select parents by where
-             * result = delete parents by where
-             * for each entity, delete cascade relations
-             *      childrenWhere = {[keyFrom]: {inq: parents[keyTo]}}
-             *      result += target.deleteAll(childrenWhere, options)
-             * return result
-             */
-            deleteAll = async (where?: Where<T>, options?: Options) => {
-                const parents = await super.find({ where: where }, options);
-
-                let result = await super.deleteAll(where, options);
-
-                const cascadeDeleteRelations = Object.entries(
-                    this.entityClass.definition.relations
-                ).filter(([_, metadata]) =>
-                    ((metadata as any).cascade || []).includes("delete")
-                );
-
-                for (const [relation, metadata] of cascadeDeleteRelations) {
-                    const keyFrom = (metadata as any).keyFrom;
-                    const keyTo = (metadata as any).keyTo;
-
-                    const parentsIds = parents
-                        .map((item: any) => item[keyFrom])
-                        .filter((item) => item);
-                    if (parentsIds.length <= 0) {
-                        continue;
-                    }
-
-                    const target = (await (this as any)
-                        [relation]()
-                        .getTargetRepository()) as DefaultCrudRepository<
-                        any,
-                        any,
-                        any
-                    >;
-                    if (!target) {
-                        continue;
-                    }
-
-                    const childrenWhere = {
-                        [keyTo]: {
-                            inq: parentsIds,
-                        },
-                    };
-
-                    result.count += (
-                        await target.deleteAll(childrenWhere, options)
-                    ).count;
-                }
-
-                return result;
-            };
-
-            /**
-             * Cascade delete() using deleteAll()
-             */
-            delete = async (entity: T, options?: Options) => {
-                await this.deleteAll(
-                    this.entityClass.buildWhereForId(
-                        this.entityClass.getIdOf(entity)
-                    ),
-                    options
-                );
-            };
-
-            /**
-             * Cascade deleteById() using deleteAll()
-             */
-            deleteById = async (id: ID, options?: Options) => {
-                await this.deleteAll(
-                    this.entityClass.buildWhereForId(id),
-                    options
-                );
             };
         }
 
