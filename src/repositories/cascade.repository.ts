@@ -51,7 +51,8 @@ export function CascadeRepositoryMixin<
     return function <
         R extends MixinTarget<DefaultCrudRepository<T, ID, Relations>>
     >(superClass: R) {
-        class MixedRepository extends superClass
+        class MixedRepository
+            extends superClass
             implements CascadeRepository<T, ID, Relations> {
             /**
              * remove navigational properties from entity
